@@ -1,0 +1,257 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Clinic - Multi-tenant root entity
+model Clinic {
+  id              String   @id @default(cuid())
+  name            String
+  owner           String
+  email           String   @unique
+  plan            String   @default("Standard") // Standard, Professional, Premium
+  status          String   @default("Active") // Active, Suspended, Inactive
+  monthlyRevenue  Float    @default(0)
+  storageUsed     Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users           User[]
+  patients        Patient[]
+  doctors         Doctor[]
+  appointments    Appointment[]
+  invoices        Invoice[]
+  medicines       Medicine[]
+  prescriptions   Prescription[]
+  consultations   TelemedicineConsultation[]
+}
+
+// User - Authentication & Authorization
+model User {
+  id              String   @id @default(cuid())
+  clinicId        String
+  clinic          Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  email           String   @unique
+  password        String
+  name            String
+  role            String   // admin, doctor, nurse, receptionist, patient
+  permissions     String[] // JSON array of permissions
+  status          String   @default("Active")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  doctors         Doctor?
+  patients        Patient?
+  doctorAppointments   Appointment[] @relation("DoctorAppointments")
+  doctorPrescriptions  Prescription[] @relation("DoctorPrescriptions")
+  doctorConsultations  TelemedicineConsultation[] @relation("DoctorConsultations")
+
+  @@unique([clinicId, email])
+}
+
+// Patient
+model Patient {
+  id                  String   @id @default(cuid())
+  clinicId            String
+  clinic              Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  userId              String?  @unique
+  user                User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name                String
+  age                 Int
+  gender              String   // Male, Female, Other
+  condition           String
+  lastVisit           DateTime?
+  status              String   @default("Active") // Active, Inactive, Critical
+  phone               String
+  email               String
+  blood               String   // Blood type O+, A+, etc.
+  address             String
+  medicalHistory      String?
+  allergies           String[] // JSON array
+  emergencyContactName String?
+  emergencyContactPhone String?
+  emergencyContactRelationship String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  appointments        Appointment[]
+  invoices            Invoice[]
+  prescriptions       Prescription[]
+  consultations       TelemedicineConsultation[]
+
+  @@index([clinicId])
+  @@unique([clinicId, email])
+}
+
+// Doctor
+model Doctor {
+  id                  String   @id @default(cuid())
+  clinicId            String
+  clinic              Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  specialization      String
+  rating              Float    @default(0)
+  availability        String   @default("Available") // Available, On Leave, In Surgery, Offline
+  patients            Int      @default(0)
+  experience          String
+  schedule            String
+  qualifications      String[] // JSON array
+  licenseNumber       String   @unique
+  phone               String
+  email               String   @unique
+  consultationFee     Float
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  appointments        Appointment[]
+  prescriptions       Prescription[]
+  consultations       TelemedicineConsultation[]
+
+  @@index([clinicId])
+}
+
+// Appointment
+model Appointment {
+  id              String   @id @default(cuid())
+  clinicId        String
+  clinic          Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patientId       String
+  patient         Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId        String
+  doctor          Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  doctorUserId    String
+  doctorUser      User     @relation("DoctorAppointments", fields: [doctorUserId], references: [id], onDelete: Cascade)
+  date            String   // ISO 8601 date
+  time            String   // HH:MM format
+  status          String   @default("Pending") // Confirmed, Pending, Completed, Cancelled
+  type            String   // Follow-up, Consultation, Check-up, New Patient, Emergency
+  notes           String?
+  duration        Int      // minutes
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  invoice         Invoice?
+  prescription    Prescription?
+
+  @@index([clinicId])
+  @@index([patientId])
+  @@index([doctorId])
+}
+
+// Medicine (Pharmacy)
+model Medicine {
+  id              String   @id @default(cuid())
+  clinicId        String
+  clinic          Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  name            String
+  category        String   // Antibiotic, Statin, etc.
+  stock           Int
+  expiry          String   // ISO 8601 date
+  price           Float
+  supplier        String
+  reorderLevel    Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  prescriptionItems PrescriptionItem[]
+
+  @@index([clinicId])
+  @@unique([clinicId, name])
+}
+
+// Prescription
+model Prescription {
+  id              String   @id @default(cuid())
+  clinicId        String
+  clinic          Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patientId       String
+  patient         Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId        String
+  doctor          Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  doctorUserId    String
+  doctorUser      User     @relation("DoctorPrescriptions", fields: [doctorUserId], references: [id], onDelete: Cascade)
+  appointmentId   String?  @unique
+  appointment     Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items           PrescriptionItem[]
+
+  @@index([clinicId])
+  @@index([patientId])
+  @@index([doctorId])
+}
+
+// Prescription Item (Medicine detail in prescription)
+model PrescriptionItem {
+  id              String   @id @default(cuid())
+  prescriptionId  String
+  prescription    Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  medicineId      String
+  medicine        Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  dosage          String
+  frequency       String
+  duration        String
+  createdAt       DateTime @default(now())
+
+  @@index([prescriptionId])
+  @@index([medicineId])
+}
+
+// Invoice
+model Invoice {
+  id              String   @id @default(cuid())
+  clinicId        String
+  clinic          Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patientId       String
+  patient         Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  appointmentId   String?  @unique
+  appointment     Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  amount          Float
+  status          String   @default("Pending") // Paid, Pending, Overdue
+  date            String   // ISO 8601 date
+  dueDate         String   // ISO 8601 date
+  paidDate        String?  // ISO 8601 date
+  services        String[] // JSON array of services
+  notes           String?
+  paymentMethod   String?
+  transactionId   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([clinicId])
+  @@index([patientId])
+}
+
+// Telemedicine Consultation
+model TelemedicineConsultation {
+  id              String   @id @default(cuid())
+  clinicId        String
+  clinic          Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patientId       String
+  patient         Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId        String
+  doctor          Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  doctorUserId    String
+  doctorUser      User     @relation("DoctorConsultations", fields: [doctorUserId], references: [id], onDelete: Cascade)
+  date            String   // ISO 8601 date
+  time            String   // HH:MM format
+  status          String   @default("Scheduled") // Scheduled, Upcoming, Completed, Cancelled
+  duration        Int      // minutes
+  meetingUrl      String?
+  sessionToken    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([clinicId])
+  @@index([patientId])
+  @@index([doctorId])
+}
